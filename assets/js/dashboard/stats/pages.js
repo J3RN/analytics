@@ -12,7 +12,9 @@ import * as api from '../api'
 export default class Pages extends React.Component {
   constructor(props) {
     super(props)
-    this.state = {loading: true}
+    this.hostnameKey = 'includeHostname__' + props.site.domain
+    const includeHostname = !!window.localStorage[this.hostnameKey]
+    this.state = {loading: true, includeHostname}
   }
 
   componentDidMount() {
@@ -20,20 +22,27 @@ export default class Pages extends React.Component {
     if (this.props.timer) this.props.timer.onTick(this.fetchPages.bind(this))
   }
 
-  componentDidUpdate(prevProps) {
-    if (this.props.query !== prevProps.query) {
+  componentDidUpdate(prevProps, prevState) {
+    if (this.props.query !== prevProps.query || this.state.includeHostname !== prevState.includeHostname) {
       this.setState({loading: true, pages: null})
       this.fetchPages()
     }
   }
 
+  setHostnameInclusion(includeHostname) {
+    window.localStorage[this.hostnameKey] = includeHostname
+    this.setState({includeHostname})
+  }
+
   fetchPages() {
     const {filters} = this.props.query
+    const include = this.state.includeHostname ? 'hostname' : null
+
     if (filters.source || filters.referrer) {
-      api.get(`/api/stats/${encodeURIComponent(this.props.site.domain)}/entry-pages`, this.props.query)
+      api.get(`/api/stats/${encodeURIComponent(this.props.site.domain)}/entry-pages`, this.props.query, {include})
         .then((res) => this.setState({loading: false, pages: res}))
     } else {
-      api.get(`/api/stats/${encodeURIComponent(this.props.site.domain)}/pages`, this.props.query)
+      api.get(`/api/stats/${encodeURIComponent(this.props.site.domain)}/pages`, this.props.query, {include})
         .then((res) => this.setState({loading: false, pages: res}))
     }
   }
@@ -41,14 +50,16 @@ export default class Pages extends React.Component {
   renderPage(page) {
     const query = new URLSearchParams(window.location.search)
     query.set('page', page.name)
+    const name = this.state.includeHostname ? page.hostname + page.name : page.name
+    const domain = this.state.includeHostname ? page.hostname : this.props.site.domain
 
     return (
-      <div className="flex items-center justify-between my-1 text-sm" key={page.name}>
+      <div className="flex items-center justify-between my-1 text-sm" key={name}>
         <div className="w-full h-8 truncate" style={{maxWidth: 'calc(100% - 4rem)'}}>
           <Bar count={page.count} all={this.state.pages} bg="bg-orange-50 dark:bg-gray-500 dark:bg-opacity-15" />
           <span className="flex px-2 group dark:text-gray-300" style={{marginTop: '-26px'}} >
             <Link to={{pathname: window.location.pathname, search: query.toString()}} className="block hover:underline">{page.name}</Link>
-            <a target="_blank" href={'http://' + this.props.site.domain + page.name} className="hidden group-hover:block">
+            <a target="_blank" href={'http://' + domain + name} className="hidden group-hover:block">
               <svg className="inline h-4 w-4 ml-1 -mt-1 text-gray-600 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"></path><path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"></path></svg>
             </a>
           </span>
@@ -71,10 +82,12 @@ export default class Pages extends React.Component {
 
   renderList() {
     if (this.state.pages.length > 0) {
+      const title = this.state.includeHostname ? "Hide hostnames" : "Show hostnames"
+
       return (
         <React.Fragment>
           <div className="flex items-center mt-3 mb-2 justify-between text-gray-500 dark:text-gray-400 text-xs font-bold tracking-wide">
-            <span>Page url</span>
+            <span style={{cursor: 'pointer'}} title={title} onClick={this.setHostnameInclusion.bind(this, !this.state.includeHostname)}>Page url</span>
             <span>{ this.label() }</span>
           </div>
 

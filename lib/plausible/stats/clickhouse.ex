@@ -167,6 +167,7 @@ defmodule Plausible.Stats.Clickhouse do
 
   def unique_visitors(site, query) do
     query = if query.period == "realtime", do: %Query{query | period: "30m"}, else: query
+
     ClickhouseRepo.one(
       from e in base_query_w_sessions(site, query),
         select: fragment("uniq(user_id)")
@@ -481,30 +482,44 @@ defmodule Plausible.Stats.Clickhouse do
         q
       end
 
-    pages = ClickhouseRepo.all(q)
+    q =
+      if "hostname" in include do
+        include_hostname(q)
+      else
+        q
+      end
 
-    if "bounce_rate" in include do
-      bounce_rates = bounce_rates_by_page_url(site, query)
-      Enum.map(pages, fn url -> Map.put(url, :bounce_rate, bounce_rates[url[:name]]) end)
-    else
-      pages
-    end
+    q =
+      if "bounce_rate" in include do
+        include_bounce_rate(q, site, query)
+      else
+        q
+      end
+
+    ClickhouseRepo.all(q)
   end
 
-  def top_pages(site, %Query{period: "realtime"} = query, limit, page, _include) do
+  def top_pages(site, %Query{period: "realtime"} = query, limit, page, include) do
     offset = (page - 1) * limit
 
-    ClickhouseRepo.all(
-      from s in base_session_query(site, query),
-        group_by: s.exit_page,
-        order_by: [desc: fragment("count")],
-        limit: ^limit,
-        offset: ^offset,
-        select: %{
-          name: fragment("? as name", s.exit_page),
-          count: fragment("uniq(?) as count", s.user_id)
-        }
-    )
+    q =
+      ClickhouseRepo.all(
+        from s in base_session_query(site, query),
+          group_by: s.exit_page,
+          order_by: [desc: fragment("count")],
+          limit: ^limit,
+          offset: ^offset,
+          select: %{
+            name: fragment("? as name", s.exit_page),
+            count: fragment("uniq(?) as count", s.user_id)
+          }
+      )
+
+    if "hostname" in include do
+      include_hostname(q)
+    else
+      q
+    end
   end
 
   def top_pages(site, query, limit, page, include) do
@@ -524,30 +539,47 @@ defmodule Plausible.Stats.Clickhouse do
         }
       )
 
-    pages = ClickhouseRepo.all(q)
+    q =
+      if "hostname" in include do
+        include_hostname(q)
+      else
+        q
+      end
 
-    if "bounce_rate" in include do
-      bounce_rates = bounce_rates_by_page_url(site, query)
-      Enum.map(pages, fn url -> Map.put(url, :bounce_rate, bounce_rates[url[:name]]) end)
-    else
-      pages
-    end
+    q =
+      if "bounce_rate" in include do
+        include_bounce_rate(q, site, query)
+      else
+        q
+      end
+
+    ClickhouseRepo.all(q)
   end
 
-  defp bounce_rates_by_page_url(site, query) do
-    ClickhouseRepo.all(
-      from s in base_session_query(site, query),
-        group_by: s.entry_page,
-        order_by: [desc: fragment("total")],
-        limit: 100,
-        select: %{
-          entry_page: s.entry_page,
-          total: fragment("count(*) as total"),
-          bounce_rate: fragment("round(sum(is_bounce * sign) / sum(sign) * 100) as bounce_rate")
-        }
+  defp include_hostname(event_query) do
+    from(e in event_query,
+      group_by: e.hostname,
+      select_merge: %{hostname: e.hostname}
     )
-    |> Enum.map(fn row -> {row[:entry_page], row[:bounce_rate]} end)
-    |> Enum.into(%{})
+  end
+
+  defp include_bounce_rate(event_query, site, query) do
+    session_query =
+      from(s in base_session_query(site, query),
+        select: %{id: s.id, entry_page: s.entry_page, is_bounce: s.is_bounce, sign: s.sign}
+      )
+
+    from(e in event_query,
+      left_join: s in subquery(session_query),
+      on: s.entry_page == e.name,
+      group_by: s.entry_page,
+      order_by: [desc: fragment("total")],
+      limit: 100,
+      select_merge: %{
+        total: count(s.id),
+        bounce_rate: fragment("round(sum(is_bounce * sign) / sum(sign) * 100) as bounce_rate")
+      }
+    )
   end
 
   defp add_percentages(stat_list) do
@@ -764,6 +796,7 @@ defmodule Plausible.Stats.Clickhouse do
     |> Enum.filter(fn row -> row[:count] > 0 end)
     |> Enum.map(fn row ->
       uri = URI.parse(row[:name])
+
       if uri.host && uri.scheme do
         Map.put(row, :is_url, true)
       else
@@ -773,15 +806,16 @@ defmodule Plausible.Stats.Clickhouse do
   end
 
   def last_24h_visitors([]), do: %{}
+
   def last_24h_visitors(sites) do
     domains = Enum.map(sites, & &1.domain)
 
     ClickhouseRepo.all(
       from e in "events",
-      group_by: e.domain,
-      where: fragment("? IN tuple(?)", e.domain, ^domains),
-      where: e.timestamp > fragment("now() - INTERVAL 24 HOUR"),
-      select: {e.domain, fragment("uniq(user_id)")}
+        group_by: e.domain,
+        where: fragment("? IN tuple(?)", e.domain, ^domains),
+        where: e.timestamp > fragment("now() - INTERVAL 24 HOUR"),
+        select: {e.domain, fragment("uniq(user_id)")}
     )
     |> Enum.into(%{})
   end
@@ -968,8 +1002,8 @@ defmodule Plausible.Stats.Clickhouse do
     q =
       if query.filters["source"] || query.filters['referrer'] || query.filters["utm_medium"] ||
            query.filters["utm_source"] || query.filters["utm_campaign"] || query.filters["screen"] ||
-             query.filters["browser"] || query.filters["browser_version"] || query.filters["os"] ||
-               query.filters["os_version"] || query.filters["country"] do
+           query.filters["browser"] || query.filters["browser_version"] || query.filters["os"] ||
+           query.filters["os_version"] || query.filters["country"] do
         from(
           e in q,
           join: sq in subquery(sessions_q),

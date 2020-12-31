@@ -70,6 +70,22 @@ defmodule PlausibleWeb.Api.ExternalControllerTest do
       assert pageview.hostname == "example.com"
     end
 
+    test "subdomain is preserved from hostname", %{conn: conn} do
+      params = %{
+        name: "pageview",
+        url: "http://blog.example.com/",
+        domain: "example.com"
+      }
+
+      conn
+      |> put_req_header("content-type", "text/plain")
+      |> post("/api/event", Jason.encode!(params))
+
+      pageview = get_event("example.com")
+
+      assert pageview.hostname == "blog.example.com"
+    end
+
     test "empty path defaults to /", %{conn: conn} do
       params = %{
         name: "pageview",

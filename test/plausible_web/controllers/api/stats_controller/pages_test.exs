@@ -51,6 +51,39 @@ defmodule PlausibleWeb.Api.StatsController.PagesTest do
              ]
     end
 
+    test "includes hostname", %{conn: conn, site: site} do
+      conn =
+        get(conn, "api/stats/#{site.domain}/pages?period=day&date=2019-01-01&include=hostname")
+
+      assert json_response(conn, 200) == [
+               %{"count" => 2, "pageviews" => 2, "hostname" => "test-site.com", "name" => "/"},
+               %{
+                 "count" => 1,
+                 "pageviews" => 1,
+                 "hostname" => "test-site.com",
+                 "name" => "/irrelevant"
+               },
+               %{
+                 "count" => 1,
+                 "pageviews" => 1,
+                 "hostname" => "test-site.com",
+                 "name" => "/register"
+               },
+               %{
+                 "count" => 1,
+                 "pageviews" => 1,
+                 "hostname" => "blog.test-site.com",
+                 "name" => "/register"
+               },
+               %{
+                 "count" => 1,
+                 "pageviews" => 1,
+                 "hostname" => "test-site.com",
+                 "name" => "/contact"
+               }
+             ]
+    end
+
     test "returns top pages in realtime report", %{conn: conn, site: site} do
       conn = get(conn, "/api/stats/#{site.domain}/pages?period=realtime")
 
@@ -84,6 +117,22 @@ defmodule PlausibleWeb.Api.StatsController.PagesTest do
                  "bounce_rate" => 33.0,
                  "count" => 3,
                  "name" => "/"
+               }
+             ]
+    end
+
+    test "includes hostname", %{conn: conn, site: site} do
+      conn =
+        get(
+          conn,
+          "/api/stats/#{site.domain}/entry-pages?period=day&date=2019-01-01&include=hostname"
+        )
+
+      assert json_response(conn, 200) == [
+               %{
+                 "count" => 3,
+                 "name" => "/",
+                 "hostname" => "test-site.com"
                }
              ]
     end
